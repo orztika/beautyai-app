@@ -1,94 +1,141 @@
-import streamlit as st
+from flask import Flask, request, jsonify, render_template_string
 import openai
 import os
 
-# 配置页面
-st.set_page_config(
-    page_title="BeautyAI - 智能文案生成器",
-    page_icon="✨"
-)
+app = Flask(__name__)
 
 # 初始化OpenAI客户端
-def init_openai():
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        try:
-            api_key = st.secrets["OPENAI_API_KEY"]
-        except:
-            return None
-    
-    openai.api_key = api_key
-    return api_key
+client = openai.OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
 
-# 生成文案的函数
-def generate_content(topic, style):
-    style_prompts = {
-        "专业": "请以专业、权威、严谨的语调撰写",
-        "亲切": "请以温暖、友好、贴近生活的语调撰写",
-        "时尚": "请以潮流、前卫、有活力的语调撰写"
-    }
+# HTML模板
+HTML_TEMPLATE = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI文案生成工具</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .container { background: #f5f5f5; padding: 20px; border-radius: 10px; }
+        textarea { width: 100%; height: 100px; margin: 10px 0; padding: 10px; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result { margin-top: 20px; padding: 15px; background: white; border-radius: 5px; }
+        .loading { display: none; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 AI文案生成工具</h1>
+        <form id="generateForm">
+            <label>输入内容描述：</label>
+            <textarea id="content" placeholder="请输入您想要生成文案的内容描述..."></textarea>
+            
+            <label>选择风格：</label>
+            <select id="style">
+                <option value="专业">专业</option>
+                <option value="活泼">活泼</option>
+                <option value="温馨">温馨</option>
+                <option value="幽默">幽默</option>
+            </select>
+            
+            <br><br>
+            <button type="submit">生成文案</button>
+        </form>
+        
+        <div class="loading" id="loading">正在生成文案，请稍候...</div>
+        <div id="result"></div>
+    </div>
     
-    prompt = f"根据主题'{topic}'生成3条{style}风格的文案，每条50-100字。{style_prompts[style]}。格式：文案1：[内容]\n文案2：[内容]\n文案3：[内容]"
-    
+    <script>
+        document.getElementById('generateForm').onsubmit = async function(e) {
+            e.preventDefault();
+            
+            const content = document.getElementById('content').value;
+            const style = document.getElementById('style').value;
+            
+            if (!content.trim()) {
+                alert('请输入内容描述');
+                return;
+            }
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('result').innerHTML = '';
+            
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content, style })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    let html = '<div class="result"><h3>生成的文案：</h3>';
+                    data.copywriting.forEach((item, index) => {
+                        html += `<p><strong>${index + 1}. ${item.title}</strong><br>${item.content}</p>`;
+                    });
+                    html += '</div>';
+                    document.getElementById('result').innerHTML = html;
+                } else {
+                    document.getElementById('result').innerHTML = '<div class="result">生成失败：' + data.error + '</div>';
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = '<div class="result">请求失败，请重试</div>';
+            }
+            
+            document.getElementById('loading').style.display = 'none';
+        };
+    </script>
+</body>
+</html>
+'''
+
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/generate', methods=['POST'])
+def generate_copywriting():
     try:
-        response = openai.ChatCompletion.create(
+        data = request.get_json()
+        content = data.get('content', '')
+        style = data.get('style', '专业')
+        
+        if not content:
+            return jsonify({'success': False, 'error': '内容不能为空'})
+        
+        # 调用OpenAI API
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "你是专业文案创作专家"},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": f"你是一个专业的文案创作助手。请根据用户提供的内容描述，生成3条{style}风格的文案。每条文案包含标题和正文。请以JSON格式返回，格式为：[{{\"title\": \"标题\", \"content\": \"正文内容\"}}]"},
+                {"role": "user", "content": content}
             ],
-            max_tokens=500,
-            temperature=0.8
+            max_tokens=1000,
+            temperature=0.7
         )
-        return response.choices[0].message.content.strip()
+        
+        # 解析响应
+        result_text = response.choices[0].message.content
+        
+        # 尝试解析JSON
+        try:
+            import json
+            copywriting = json.loads(result_text)
+        except:
+            # 如果解析失败，创建简单格式
+            copywriting = [
+                {"title": f"{style}文案1", "content": result_text[:200]},
+                {"title": f"{style}文案2", "content": result_text[200:400] if len(result_text) > 200 else result_text},
+                {"title": f"{style}文案3", "content": result_text[400:] if len(result_text) > 400 else result_text}
+            ]
+        
+        return jsonify({'success': True, 'copywriting': copywriting})
+        
     except Exception as e:
-        return f"生成错误：{str(e)}"
+        return jsonify({'success': False, 'error': str(e)})
 
-# 解析生成的文案
-def parse_generated_content(content):
-    lines = content.split('\n')
-    copywriting_list = []
-    
-    for line in lines:
-        if line.strip() and '：' in line:
-            copy_text = line.split('：', 1)[1].strip()
-            if copy_text:
-                copywriting_list.append(copy_text)
-    
-    if not copywriting_list:
-        lines = [line.strip() for line in content.split('\n') if line.strip()]
-        copywriting_list = lines[:3]
-    
-    return copywriting_list[:3]
-
-# 主界面
-def main():
-    st.title("✨ BeautyAI 智能文案生成器")
-    
-    # 检查API密钥
-    api_key = init_openai()
-    if not api_key:
-        st.error("请配置OpenAI API密钥")
-        return
-    
-    # 输入区域
-    topic = st.text_area("请输入文案主题内容：", height=100)
-    style = st.selectbox("选择文案风格：", ["专业", "亲切", "时尚"])
-    
-    if st.button("生成文案"):
-        if not topic.strip():
-            st.warning("请先输入文案主题内容")
-        else:
-            with st.spinner("生成中..."):
-                generated_content = generate_content(topic, style)
-                copywriting_list = parse_generated_content(generated_content)
-                
-                if copywriting_list:
-                    st.success(f"成功生成{len(copywriting_list)}条{style}风格文案")
-                    for i, copy_text in enumerate(copywriting_list, 1):
-                        st.write(f"**文案{i}：**{copy_text}")
-                else:
-                    st.error("生成失败，请重试")
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    app.run(debug=True)
