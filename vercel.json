@@ -13,18 +13,5 @@
   ],
   "env": {
     "PYTHONPATH": "."
-  },
-  "functions": {
-    "app.py": {
-      "excludeFiles": [
-        ".git/**",
-        ".gitignore",
-        "README.md",
-        "DEPLOYMENT_GUIDE.md",
-        "main.py",
-        ".env.example",
-        "runtime.txt"
-      ]
-    }
   }
 }
