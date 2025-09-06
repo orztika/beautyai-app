@@ -137,5 +137,8 @@ def generate_copywriting():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+# Vercel需要的应用实例
+app = app
+
 if __name__ == '__main__':
     app.run(debug=True)
