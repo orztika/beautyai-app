@@ -5,7 +5,12 @@ import os
 app = Flask(__name__)
 
 # 初始化OpenAI客户端
-client = openai.OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+api_key = os.environ.get('OPENAI_API_KEY')
+if not api_key:
+    print("警告: OPENAI_API_KEY环境变量未设置")
+    client = None
+else:
+    client = openai.OpenAI(api_key=api_key)
 
 # HTML模板
 HTML_TEMPLATE = '''
@@ -96,6 +101,16 @@ HTML_TEMPLATE = '''
 def index():
     return render_template_string(HTML_TEMPLATE)
 
+@app.route('/health')
+def health_check():
+    """健康检查端点，用于诊断部署问题"""
+    status = {
+        'status': 'ok',
+        'openai_api_key_configured': api_key is not None,
+        'environment': os.environ.get('VERCEL_ENV', 'local')
+    }
+    return jsonify(status)
+
 @app.route('/generate', methods=['POST'])
 def generate_copywriting():
     try:
@@ -105,6 +120,10 @@ def generate_copywriting():
         
         if not content:
             return jsonify({'success': False, 'error': '内容不能为空'})
+        
+        # 检查API密钥是否可用
+        if client is None:
+            return jsonify({'success': False, 'error': 'OpenAI API密钥未配置，请联系管理员设置OPENAI_API_KEY环境变量'})
         
         # 调用OpenAI API
         response = client.chat.completions.create(
